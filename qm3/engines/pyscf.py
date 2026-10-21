@@ -289,6 +289,137 @@ class run_pbc( qm3.engines.template ):
 
 
 
+class run_pc( qm3.engines.template ):
+    """
+    DFT/MM with non-periodic point-charge electrostatic embedding: PySCF (gpu=False) or GPU4PySCF (gpu=True)
+
+    same embedding as most QM programs (ORCA, Gaussian...) and as ASH "elstat": the MM charges
+    (minimum image around the QM center if img = True) enter hcore as point charges; closed-
+    and open-shell (UKS, also for spin = 0 with "unrestricted") on CPU and GPU
+
+    the SCF guess is the density of the previous call (kept in memory)
+
+    opts (besides the ones of "run"):
+        density_fit     use density fitting (default: True)
+        auxbasis        density fitting auxiliary basis (None: PySCF default)
+        unrestricted    UKS also for spin = 0 (broken-symmetry solutions)
+        grid_response   include the DFT grid response in the gradient
+        device          GPU index for this process
+    """
+    def __init__( self, mol: object,
+            opts: typing.Optional[dict] = {},
+            sel_QM: typing.Optional[numpy.array] = numpy.array( [], dtype=numpy.bool_ ),
+            sel_MM: typing.Optional[numpy.array] = numpy.array( [], dtype=numpy.bool_ ),
+            link: typing.Optional[list] = [],
+            gpu: typing.Optional[bool] = True ):
+        qm3.engines.template.__init__( self, mol, sel_QM, sel_MM, link )
+        self.cx  = 1.0 / qm3.data.A0
+        self.ce  = qm3.data.H2J
+        self.cg  = self.ce * self.cx
+        self.opt = { "basis": "def2-svp", "conv_tol": 1.e-9, "charge": 0, "spin": 0,
+                "method": "b3lypg", "memory": 4096, "grid": 3, "max_cyc": 50, "nproc": 2,
+                "auxbasis": None, "device": None, "grid_response": True, "density_fit": True, "unrestricted": False }
+        self.opt.update( opts )
+        self.gpu = gpu
+        if( self.gpu ):
+            import  cupy
+            import  gpu4pyscf.dft
+            import  gpu4pyscf.qmmm.itrf
+            if( self.opt["device"] != None ):
+                cupy.cuda.Device( self.opt["device"] ).use()
+            self.dft  = gpu4pyscf.dft
+            self.itrf = gpu4pyscf.qmmm.itrf
+        else:
+            pyscf.lib.num_threads( self.opt["nproc"] )
+            self.dft  = pyscf.dft
+            self.itrf = pyscf.qmmm.itrf
+        self.dm  = None
+        self.mf  = None
+        self.last_cycles = None
+        # redistribute MM-charge on the remaining atoms of the group
+        self.__dq = numpy.zeros( mol.natm )
+        for i,j in self.lnk:
+            if( j in self.grp ):
+                self.__dq[self.grp[j]] += mol.chrg[j] / len( self.grp[j] )
+        # ----------------------------------------------------------
+
+
+    def update_coor( self, mol ):
+        aQM = pyscf.gto.Mole()
+        aQM.unit = "Angstrom"
+        aQM.symmetry = False
+        aQM.basis = self.opt["basis"]
+        aQM.spin = self.opt["spin"]
+        aQM.charge = self.opt["charge"]
+        aQM.max_memory = self.opt["memory"]
+        aQM.verbose = 0
+        aQM.atom = ""
+        for i in self.sel:
+            aQM.atom += "%-2s%20.10lf%20.10lf%20.10lf\n"%( qm3.data.symbol[mol.anum[i]],
+                    mol.coor[i,0], mol.coor[i,1], mol.coor[i,2] )
+        for i in range( len( self.lnk ) ):
+            c, v = qm3.engines.Link_coor( self.lnk[i][0], self.lnk[i][1], mol )
+            aQM.atom += "%-2s%20.10lf%20.10lf%20.10lf\n"%( "H", c[0], c[1], c[2] )
+        aQM.build()
+        if( aQM.spin == 0 and not self.opt["unrestricted"] ):
+            dft = self.dft.RKS( aQM )
+        else:
+            dft = self.dft.UKS( aQM )
+        dft.verbose = 0
+        dft.conv_tol = self.opt["conv_tol"]
+        dft.max_cycle = self.opt["max_cyc"]
+        dft.grids.level = self.opt["grid"]
+        dft.xc = self.opt["method"]
+        dft.max_memory = self.opt["memory"]
+        if( self.opt["density_fit"] ):
+            dft = dft.density_fit( auxbasis = self.opt["auxbasis"] )
+        if( len( self.nbn ) > 0 ):
+            crd = mol.coor[self.nbn].copy()
+            if( self.img ):
+                cen = numpy.mean( mol.coor[self.sel], axis = 0 )
+                crd -= mol.boxl * numpy.round( ( crd - cen ) / mol.boxl, 0 )
+            chg = mol.chrg[self.nbn] + self.__dq[self.nbn]
+            scf = self.itrf.add_mm_charges( dft, crd, chg, unit = "Angstrom" )
+        else:
+            scf = dft
+        return( scf )
+
+
+    def __kernel( self, mol ):
+        scf = self.update_coor( mol )
+        out = float( scf.kernel( dm0 = self.dm ) ) * self.ce
+        if( not scf.converged ):
+            print( ">> qm3.engines.pyscf.run_pc: SCF not converged!" )
+        self.last_cycles = getattr( scf, "cycles", None )
+        self.mf = scf
+        self.dm = scf.make_rdm1()
+        mol.func += out
+        return( scf, out )
+
+
+    def get_func( self, mol ):
+        scf, out = self.__kernel( mol )
+        return( out )
+
+
+    def get_grad( self, mol ):
+        scf, out = self.__kernel( mol )
+        grd = scf.nuc_grad_method()
+        if( self.opt["density_fit"] ):
+            grd.auxbasis_response = True
+        grd.grid_response = self.opt["grid_response"]
+        g = _to_numpy( grd.kernel() ) * self.cg
+        mol.grad[self.sel,:] += g[:len( self.sel )]
+        qm3.engines.Link_chain( mol, self.lnk, g[len( self.sel ):] )
+        if( len( self.nbn ) > 0 ):
+            # grad_hcore_mm is linear in the density: unrestricted needs the total (alpha + beta) density
+            dm = self.dm[0] + self.dm[1] if( self.dm.ndim == 3 ) else self.dm
+            g = _to_numpy( grd.grad_nuc_mm() ) + _to_numpy( grd.grad_hcore_mm( dm ) )
+            mol.grad[self.nbn,:] += g * self.cg
+        return( out )
+
+
+
 class runGPU( run_pbc ):
     def __init__( self, mol: object, 
             opts: typing.Optional[dict] = {},
