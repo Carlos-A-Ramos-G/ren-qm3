@@ -152,6 +152,7 @@ class run_pbc( qm3.engines.template ):
     string nodes forked in the same folder do not share/overwrite a checkpoint file)
 
     opts (besides the ones of "run"):
+        density_fit use density fitting (default: True)
         auxbasis    density fitting auxiliary basis (None: PySCF default)
         rcut_ewald  real-space Ewald cutoff (Ang; default: half of the shortest box side)
         rcut_hcore  MM charges within this distance (Ang) of the QM center enter hcore exactly,
@@ -173,7 +174,7 @@ class run_pbc( qm3.engines.template ):
         self.cg  = self.ce * self.cx
         self.opt = { "basis": "def2-svp", "conv_tol": 1.e-9, "charge": 0, "spin": 0,
                 "method": "b3lypg", "memory": 4096, "grid": 3, "max_cyc": 50, "nproc": 2,
-                "auxbasis": None, "rcut_ewald": None, "rcut_hcore": None, "mm_radius": 0.1, "device": None, "grid_response": True }
+                "auxbasis": None, "rcut_ewald": None, "rcut_hcore": None, "mm_radius": 0.1, "device": None, "grid_response": True, "density_fit": True }
         self.opt.update( opts )
         self.gpu = gpu
         if( self.gpu ):
@@ -230,7 +231,8 @@ class run_pbc( qm3.engines.template ):
         dft.grids.level = self.opt["grid"]
         dft.xc = self.opt["method"]
         dft.max_memory = self.opt["memory"]
-        dft = dft.density_fit( auxbasis = self.opt["auxbasis"] )
+        if( self.opt["density_fit"] ):
+            dft = dft.density_fit( auxbasis = self.opt["auxbasis"] )
         if( len( self.nbn ) > 0 ):
             # MM charges in the image closest to the QM center (the embedding only looks at the first shell of cells)
             cen = numpy.mean( mol.coor[self.sel], axis = 0 )
@@ -266,7 +268,8 @@ class run_pbc( qm3.engines.template ):
     def get_grad( self, mol ):
         scf, out = self.__kernel( mol )
         grd = scf.nuc_grad_method()
-        grd.auxbasis_response = True
+        if( self.opt["density_fit"] ):
+            grd.auxbasis_response = True
         grd.grid_response = self.opt["grid_response"]
         g = _to_numpy( grd.kernel() ).ravel().tolist()
         qm3.engines.Link_grad( self.vla, g )
