@@ -26,7 +26,7 @@ The gradient on the link H itself is then dropped. For example, `orca.parse_log`
 | `Link_grad` | up to **13 kJ/(mol·Å)** | **missing** |
 | `Link_chain` (fix) | ≤ 2×10⁻⁴ kJ/(mol·Å) | correct |
 
-**Fix (already in the fork, commit `f15477e`).** `Link_chain( mol, lnk, grd, dst )` applies the exact chain rule of `Link_coor`. With u = (M − Q)/r and J = (d/r)(I − u uᵀ):
+**Fix (already in the fork, commit `6b52689`).** `Link_chain( mol, lnk, grd, dst )` applies the exact chain rule of `Link_coor`. With u = (M − Q)/r and J = (d/r)(I − u uᵀ):
 
 ```
 g_Q += g_H − J g_H
