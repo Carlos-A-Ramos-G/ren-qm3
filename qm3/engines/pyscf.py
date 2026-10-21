@@ -148,6 +148,9 @@ class run_pbc( qm3.engines.template ):
     """
     DFT/MM with periodic (Ewald) electrostatic embedding: PySCF (gpu=False) or GPU4PySCF (gpu=True)
 
+    open-shell (UKS) embedding needs gpu=True: pyscf.qmmm.pbc (CPU, PySCF 2.14) only handles
+    closed-shell densities
+
     the SCF guess is the density of the previous call (kept in memory, so concurrent
     string nodes forked in the same folder do not share/overwrite a checkpoint file)
 
@@ -255,6 +258,8 @@ class run_pbc( qm3.engines.template ):
         if( not scf.converged ):
             print( ">> qm3.engines.pyscf.run_pbc: SCF not converged!" )
         self.last_cycles = getattr( scf, "cycles", None )
+        # last SCF object (for <S**2>, populations, chkfile...)
+        self.mf = scf
         self.dm = scf.make_rdm1()
         mol.func += out
         return( scf, out )
