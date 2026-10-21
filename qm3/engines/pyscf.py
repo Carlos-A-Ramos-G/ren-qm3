@@ -277,13 +277,10 @@ class run_pbc( qm3.engines.template ):
         if( self.opt["density_fit"] ):
             grd.auxbasis_response = True
         grd.grid_response = self.opt["grid_response"]
-        g = _to_numpy( grd.kernel() ).ravel().tolist()
-        qm3.engines.Link_grad( self.vla, g )
-        k = 0
-        for i in self.sel:
-            for j in [0, 1, 2]:
-                mol.grad[i,j] += g[k] * self.cg
-                k += 1
+        g = _to_numpy( grd.kernel() ) * self.cg
+        mol.grad[self.sel,:] += g[:len( self.sel )]
+        # link atoms: exact chain rule onto both the QM and the MM atom of each link
+        qm3.engines.Link_chain( mol, self.lnk, g[len( self.sel ):] )
         if( len( self.nbn ) > 0 ):
             # forces on the MM charges: consistent with the Ewald energy (and computed on the GPU)
             g = _to_numpy( grd.grad_nuc_mm() ) + _to_numpy( grd.grad_hcore_mm( self.dm ) ) + _to_numpy( grd.de_ewald_mm )
