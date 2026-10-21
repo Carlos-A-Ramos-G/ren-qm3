@@ -98,6 +98,11 @@ def load_upstream( unitfix: bool ):
         src, n = re.subn( r"\n( +)crd \*= self\.cx\n(\1chg = mol\.chrg\[self\.nbn\] \+ self\.__dq\[self\.nbn\]\n\1cut = )",
                 r"\n\2", src )
         assert n == 1, "unit fix: pattern not found"
+    if( base.get( "unrestricted" ) ):
+        # runGPU always uses RKS for spin = 0: broken-symmetry (UKS, Ms = 0) needs this one change
+        src, n = re.subn( r"\n( +)if\( aQM\.spin == 0 \):\n(\1    dft = gpu4pyscf\.dft\.RKS)",
+                r"\n\1if( aQM.spin == 0 and not self.opt.get( 'unrestricted' ) ):\n\2", src )
+        assert n == 1, "unrestricted: pattern not found"
     if( arg.backend == "cpu" ):
         for a, b in [ ( "import  gpu4pyscf.dft\n", "import  pyscf.dft\n" ),
                 ( "import  gpu4pyscf.qmmm.pbc\n", "import  pyscf.qmmm.pbc.itrf\n" ),

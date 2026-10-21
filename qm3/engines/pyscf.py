@@ -156,6 +156,7 @@ class run_pbc( qm3.engines.template ):
 
     opts (besides the ones of "run"):
         density_fit use density fitting (default: True)
+        unrestricted    UKS also for spin = 0 (broken-symmetry solutions)
         auxbasis    density fitting auxiliary basis (None: PySCF default)
         rcut_ewald  real-space Ewald cutoff (Ang; default: half of the shortest box side)
         rcut_hcore  MM charges within this distance (Ang) of the QM center enter hcore exactly,
@@ -177,7 +178,7 @@ class run_pbc( qm3.engines.template ):
         self.cg  = self.ce * self.cx
         self.opt = { "basis": "def2-svp", "conv_tol": 1.e-9, "charge": 0, "spin": 0,
                 "method": "b3lypg", "memory": 4096, "grid": 3, "max_cyc": 50, "nproc": 2,
-                "auxbasis": None, "rcut_ewald": None, "rcut_hcore": None, "mm_radius": 0.1, "device": None, "grid_response": True, "density_fit": True }
+                "auxbasis": None, "rcut_ewald": None, "rcut_hcore": None, "mm_radius": 0.1, "device": None, "grid_response": True, "density_fit": True, "unrestricted": False }
         self.opt.update( opts )
         self.gpu = gpu
         if( self.gpu ):
@@ -224,7 +225,7 @@ class run_pbc( qm3.engines.template ):
                 self.vla.append( ( self.sel.searchsorted( self.lnk[i][0] ), k, v ) )
                 k += 1
         aQM.build()
-        if( aQM.spin == 0 ):
+        if( aQM.spin == 0 and not self.opt["unrestricted"] ):
             dft = self.dft.RKS( aQM )
         else:
             dft = self.dft.UKS( aQM )
