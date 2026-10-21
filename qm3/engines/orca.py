@@ -11,10 +11,17 @@ class run( qm3.engines.template ):
     def __init__( self, mol: object, fdsc: typing.IO,
             sel_QM: typing.Optional[numpy.array] = numpy.array( [], dtype=numpy.bool_ ),
             sel_MM: typing.Optional[numpy.array] = numpy.array( [], dtype=numpy.bool_ ),
-            link: typing.Optional[list] = [] ):
+            link: typing.Optional[list] = [],
+            fnext: typing.Optional[typing.IO] = None ):
+        """
+        fnext: optional input template for every call after the first one (e.g. the first call builds a
+               broken-symmetry state with %scf FlipSpin ... FinalMs ... end, the following ones only
+               restart from orca.gbw at the final Ms); without it, the same template is always used
+        """
         qm3.engines.template.__init__( self, mol, sel_QM, sel_MM, link )
         self.exe = "bash r.orca"
         self.inp = fdsc.read()
+        self.inp_next = fnext.read() if fnext != None else None
         self.ce  = qm3.data.H2J
         self.cg  = self.ce / qm3.data.A0
         self.ch  = self.cg / qm3.data.A0
@@ -50,7 +57,7 @@ class run( qm3.engines.template ):
                 tmp = mol.coor[i].copy()
                 if( self.img ):
                     tmp -= mol.boxl * numpy.round( ( tmp - cen ) / mol.boxl, 0 )
-                f.write( "%12.4lf%20.10lf%20.10lf%20.10lf\n"%( mol.chrg[i] + self.__dq[i], tmp[0], tmp[1], tmp[2] ) )
+                f.write( "%14.6lf%20.10lf%20.10lf%20.10lf\n"%( mol.chrg[i] + self.__dq[i], tmp[0], tmp[1], tmp[2] ) )
             f.close()
         s_rn = ""
         if( run == "grad" ):
@@ -74,13 +81,10 @@ class run( qm3.engines.template ):
             n = int( t[0] )
             out = float( t[1] ) * self.ce
             mol.func += out
-            g = [ float( t[i] ) * self.cg for i in range( 2, 2 + n * 3 ) ]
-            qm3.engines.Link_grad( self.vla, g )
-            k = 0
-            for i in self.sel:
-                for j in [0, 1, 2]:
-                    mol.grad[i,j] += g[k]
-                    k += 1
+            g = numpy.array( [ float( t[i] ) for i in range( 2, 2 + n * 3 ) ] ).reshape( ( n, 3 ) ) * self.cg
+            mol.grad[self.sel,:] += g[:len( self.sel )]
+            # link atoms: exact chain rule onto both the QM and the MM atom of each link
+            qm3.engines.Link_chain( mol, self.lnk, g[len( self.sel ):] )
             if( len( self.nbn ) > 0 and os.access( "orca.pcgrad", os.R_OK ) ):
                 f = open( "orca.pcgrad", "rt" )
                 t = re.compile( r"[0-9\.\-]+" ).findall( f.read() )
@@ -120,19 +124,36 @@ class run( qm3.engines.template ):
         return( ( out, h ) )
 
 
+    def execute( self ):
+        # never read the results of a previous call if this one fails
+        for ff in [ "orca.engrad", "orca.pcgrad", "orca.hess" ]:
+            if( os.access( ff, os.R_OK ) ):
+                os.unlink( ff )
+        ret = os.system( self.exe )
+        ok  = False
+        if( os.access( "orca.out", os.R_OK ) ):
+            with open( "orca.out", "rt" ) as f:
+                ok = "ORCA TERMINATED NORMALLY" in f.read()
+        if( ret != 0 or not ok ):
+            raise RuntimeError( "qm3.engines.orca: ORCA failed (exit status %d, see orca.out)"%( ret ) )
+        if( self.inp_next != None ):
+            self.inp = self.inp_next
+            self.inp_next = None
+
+
     def get_func( self, mol ):
         self.mk_input( mol, "ener" )
-        os.system( self.exe )
+        self.execute()
         return( self.parse_log( mol, "ener" )[0] )
 
 
     def get_grad( self, mol ):
         self.mk_input( mol, "grad" )
-        os.system( self.exe )
+        self.execute()
         return( self.parse_log( mol, "grad" )[0] )
 
 
     def get_hess( self, mol ):
         self.mk_input( mol, "hess" )
-        os.system( self.exe )
+        self.execute()
         return( self.parse_log( mol, "hess" ) )
