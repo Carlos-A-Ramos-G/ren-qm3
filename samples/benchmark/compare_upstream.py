@@ -73,6 +73,24 @@ smpl = os.path.dirname( os.path.dirname( here ) ) + os.sep
 
 
 # ------------------------------------------------------------------------------------
+def patch_gpu4pyscf_dump_chk():
+    # the upstream runGPU writes ./pyscf.chk, which needs the gpu4pyscf patch described in its own
+    # comments: with the periodic QM/MM embedding e_tot is a cupy scalar that h5py cannot store
+    # (TypeError: Implicit conversion to a NumPy array is not allowed); applied here at runtime,
+    # run_pbc is not affected (it writes no chkfile)
+    import  gpu4pyscf.scf.hf
+    cls = gpu4pyscf.scf.hf.SCF
+    if( getattr( cls.dump_chk, "_qm3_patched", False ) ):
+        return
+    orig = cls.dump_chk
+    def dump_chk( self, envs ):
+        if( hasattr( envs.get( "e_tot" ), "get" ) ):
+            envs = dict( envs, e_tot = float( envs["e_tot"] ) )
+        return( orig( self, envs ) )
+    dump_chk._qm3_patched = True
+    cls.dump_chk = dump_chk
+
+
 def load_upstream( unitfix: bool ):
     src = open( here + "pyscf_upstream.py" ).read()
     if( unitfix ):
@@ -91,6 +109,7 @@ def load_upstream( unitfix: bool ):
     else:
         import  gpu4pyscf.dft
         import  gpu4pyscf.qmmm.pbc
+        patch_gpu4pyscf_dump_chk()
     mod = types.ModuleType( "pyscf_upstream" )
     exec( compile( src, here + "pyscf_upstream.py", "exec" ), mod.__dict__ )
     assert hasattr( mod, "runGPU" ), "upstream runGPU not defined (import error swallowed by its try/except)"
