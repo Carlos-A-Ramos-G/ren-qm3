@@ -293,7 +293,7 @@ class run_pc( qm3.engines.template ):
     """
     DFT/MM with non-periodic point-charge electrostatic embedding: PySCF (gpu=False) or GPU4PySCF (gpu=True)
 
-    same embedding as most QM programs (ORCA, Gaussian...) and as ASH "elstat": the MM charges
+    same embedding as most QM programs (ORCA, Gaussian...): the MM charges
     (minimum image around the QM center if img = True) enter hcore as point charges; closed-
     and open-shell (UKS, also for spin = 0 with "unrestricted") on CPU and GPU
 
