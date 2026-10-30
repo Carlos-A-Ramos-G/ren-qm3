@@ -30,7 +30,7 @@ class run( qm3.engines.template ):
         verbosity       xtb output level (0: silent, 1: SCC iterations)
         output          file for the xtb output (default: stdout)
     MM charges are taken in the minimum image around the QM centroid (img = True by default; the qm3 Fortran
-    xtb engine wraps them around the origin instead).
+    xtb engine wraps them around the origin instead); for MD use img = "fixed" (see template.mm_coor).
     Load libxtb before importing pyscf: pyscf ships an older libdftd4.so with the same soname, which
     breaks libtblite ("undefined symbol __dftd4_cutoff_MOD_smooth_cutoff").
     Energy in kJ/mol, gradients in kJ/(mol A); link atoms through the exact chain rule (Link_chain).
@@ -114,11 +114,8 @@ class run( qm3.engines.template ):
 
 
     def _mm( self, mol ):
-        """MM charges (minimum image around the QM centroid) and, with pc_cutoff, their switching factors"""
-        crd = mol.coor[self.nbn].copy()
-        if( self.img ):
-            cen = numpy.mean( mol.coor[self.sel], axis = 0 )
-            crd -= mol.boxl * numpy.round( ( crd - cen ) / mol.boxl, 0 )
+        """MM charges (image from self.img, see template.mm_coor) and, with pc_cutoff, their switching factors"""
+        crd = self.mm_coor( mol )
         chg = mol.chrg[self.nbn] + self.__dq[self.nbn]
         if( not self.opt["pc_cutoff"] ):
             return( numpy.arange( len( self.nbn ) ), crd, chg, None, None, None )

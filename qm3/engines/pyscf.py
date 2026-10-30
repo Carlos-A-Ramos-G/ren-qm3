@@ -32,8 +32,6 @@ class run( qm3.engines.template ):
 
 
     def update_coor( self, mol ):
-        if( self.img ):
-            cen = numpy.mean( mol.coor[self.sel], axis = 0 )
         # just updating coordinates seems not to work properly...
         aQM = pyscf.gto.Mole()
         aQM.unit = "Angstrom"
@@ -70,11 +68,7 @@ class run( qm3.engines.template ):
         if( os.path.isfile( "pyscf.chk" ) ):
             dft.init_guess = "chkfile"
         if( len( self.nbn ) > 0 ):
-            crd = mol.coor[self.nbn].copy()
-            if( self.img ):
-                for i in range( crd.shape[0] ):
-                    crd[i] -= mol.boxl * numpy.round( ( crd[i] - cen ) / mol.boxl, 0 )
-            crd *= self.cx
+            crd = self.mm_coor( mol ) * self.cx
             chg = mol.chrg[self.nbn] + self.__dq[self.nbn]
             scf = pyscf.qmmm.mm_charge( dft, crd, chg, unit = "Bohr" )
         else:
@@ -294,7 +288,8 @@ class run_pc( qm3.engines.template ):
     DFT/MM with non-periodic point-charge electrostatic embedding: PySCF (gpu=False) or GPU4PySCF (gpu=True)
 
     same embedding as most QM programs (ORCA, Gaussian...): the MM charges
-    (minimum image around the QM center if img = True) enter hcore as point charges; closed-
+    (minimum image around the QM center if img = True, kept from the first call if img = "fixed":
+    use it for MD, see template.mm_coor) enter hcore as point charges; closed-
     and open-shell (UKS, also for spin = 0 with "unrestricted") on CPU and GPU
 
     the SCF guess is the density of the previous call (kept in memory)
@@ -374,10 +369,7 @@ class run_pc( qm3.engines.template ):
         if( self.opt["density_fit"] ):
             dft = dft.density_fit( auxbasis = self.opt["auxbasis"] )
         if( len( self.nbn ) > 0 ):
-            crd = mol.coor[self.nbn].copy()
-            if( self.img ):
-                cen = numpy.mean( mol.coor[self.sel], axis = 0 )
-                crd -= mol.boxl * numpy.round( ( crd - cen ) / mol.boxl, 0 )
+            crd = self.mm_coor( mol )
             chg = mol.chrg[self.nbn] + self.__dq[self.nbn]
             scf = self.itrf.add_mm_charges( dft, crd, chg, unit = "Angstrom" )
         else:
